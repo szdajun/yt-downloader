@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yt-downloader"
+version = "1.2.0"
+description = "YouTube 视频下载器 — 高清下载 + 准入门槛自动验证 (短边≥720 / 码率≥5Mbps / 时长≥30s) + 瑜伽源衣着预审"
+requires-python = ">=3.11"
+authors = [{name = "User"}]
+keywords = ["youtube", "downloader", "yt-dlp", "video"]
+dependencies = [
+    # 底层下载引擎 — 业界标准, 活跃维护
+    "yt-dlp>=2024.0.0",
+    # YouTube 2025+ n-challenge 签名求解器 (需配 node/deno/bun 运行时, 见 README)
+    "yt-dlp-ejs>=0.8.0",
+    # PO token provider (绕 YouTube 格式限制; 多数视频 m3u8 路径自动绕过, 少数高清需本地 server)
+    "bgutil-ytdlp-pot-provider>=1.3.0",
+    # GUI (Qt6 原生控件, 信号槽/线程模型; LGPL)
+    "PySide6>=6.6.0",
+]
+
+[project.optional-dependencies]
+# 打包成单文件 exe (可选: uv pip install pyinstaller && pyinstaller)
+pack = ["pyinstaller>=6.0"]
+
+[project.scripts]
+yt-downloader = "yt_downloader.app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["yt_downloader*"]
