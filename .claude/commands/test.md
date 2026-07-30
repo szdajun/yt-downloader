@@ -1,5 +1,5 @@
 ---
-description: 跑测试(以后加了测试用)
+description: 跑 pytest(tests/ — verify + trim + downloader)
 ---
 
 cd F:\wkspace\yt-downloader && uv run pytest -q

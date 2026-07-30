@@ -35,9 +35,9 @@ YouTube / 抖音视频下载器 GUI 桌面应用。三类关键依赖:
 |---|---|
 | 启动 GUI(双击) | `F:\wkspace\yt-downloader\run.bat` |
 | 装依赖(首次) | `cd F:\wkspace\yt-downloader && uv sync` |
-| 跑测试 | `uv run pytest -q`(目前没有,以后加) |
+| 跑测试 | `uv run pytest -q` |
 | 打包单文件 exe | `uv run --extra pack pyinstaller --onefile --windowed yt_downloader/app.py` |
-| 代码检查 | `uv run ruff check yt_downloader/`(以后加 ruff) |
+| 代码检查 | `uv run ruff check yt_downloader/` |
 
 也可用 slash 命令:`/start-gui` `/test` `/build-exe` `/lint`。
 
