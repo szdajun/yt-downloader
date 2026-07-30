@@ -24,9 +24,41 @@ dependencies = [
 # 打包成单文件 exe (可选: uv pip install pyinstaller && pyinstaller)
 pack = ["pyinstaller>=6.0"]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
 [project.scripts]
 yt-downloader = "yt_downloader.app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["yt_downloader*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+    ".venv",
+    "assets",
+]
+
+[tool.ruff.lint]
+# E/F/W = pycodestyle/pyflakes/pycodestyle-warnings
+# I = isort (import 顺序)
+# B = bugbear (深入错误检查)
+# UP = pyupgrade (现代化写法)
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E501",  # line-too-long: 中文项目 + 长路径容易超,手动控制
+    "B008",  # do-not-perform-function-call-in-argument-default: PySide6 信号连接常用
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["yt_downloader"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
