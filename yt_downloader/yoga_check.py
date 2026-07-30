@@ -110,7 +110,7 @@ def run_deep_check(python_exe: str, script: str, video: str, work_dir: str
     stem = os.path.splitext(os.path.basename(video))[0]
     report = os.path.join(work_dir, stem, "report.json")
     try:
-        with open(report, "r", encoding="utf-8") as f:
+        with open(report, encoding="utf-8") as f:
             d = json.load(f)
         verdict = d.get("verdict")
         summary = (f"{verdict} — 高危体态 {d.get('pose_risk_frames', '?')}/"

@@ -17,7 +17,7 @@ import tempfile
 from PySide6.QtCore import QThread, Signal
 
 from .downloader import download
-from .trim import trim, remove_segment
+from .trim import remove_segment, trim
 from .yoga_check import extract_frames, run_deep_check
 
 

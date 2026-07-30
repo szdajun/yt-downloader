@@ -33,7 +33,7 @@ def load() -> Settings:
     s = Settings()
     try:
         if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
                 d = json.load(f)
             for k in ("output_dir", "format_label", "verify", "appearance",
                       "cookies_browser", "cookies_file", "force"):

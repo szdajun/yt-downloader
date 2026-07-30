@@ -15,20 +15,30 @@ import shutil
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QPalette, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
-    QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QTextEdit, QVBoxLayout, QWidget,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QProgressBar,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
 
 from . import config
 from .dialogs import BatchDialog, TrimDialog, YogaReviewDialog
-from .downloader import FORMATS, AUDIO_SUFFIXES, is_audio_format
+from .downloader import AUDIO_SUFFIXES, FORMATS, is_audio_format
 from .verify import THRESH_BITRATE, THRESH_DURATION, THRESH_SHORT_SIDE, ProbeResult, probe
-from .yoga_check import fitness_env
 from .workers import BatchWorker, DeepCheckWorker, DownloadWorker, TrimWorker, YogaFrameWorker
+from .yoga_check import fitness_env
 
 APP_TITLE = "YT 视频下载器"
 APP_VERSION = "1.2.0"
@@ -123,7 +133,9 @@ class MainWindow(QMainWindow):
     # ---------------- UI 构建 ----------------
     def _build_header(self) -> None:
         title = QLabel("📺  YT 视频下载器")
-        f = QFont(); f.setPointSize(18); f.setBold(True)
+        f = QFont()
+        f.setPointSize(18)
+        f.setBold(True)
         title.setFont(f)
         sub = QLabel("高清下载 (YouTube / 抖音) + 验证准入 + 播放 / 裁剪 / 去广告")
         sub.setStyleSheet("color:#9ca3af;")
@@ -205,7 +217,9 @@ class MainWindow(QMainWindow):
     def _build_buttons(self) -> None:
         row = QHBoxLayout()
         self.dl_btn = QPushButton("⬇  下载")
-        f = QFont(); f.setPointSize(11); f.setBold(True)
+        f = QFont()
+        f.setPointSize(11)
+        f.setBold(True)
         self.dl_btn.setFont(f)
         self.dl_btn.setMinimumHeight(42)
         self.dl_btn.clicked.connect(self._on_download)
@@ -237,7 +251,9 @@ class MainWindow(QMainWindow):
         g.setHorizontalSpacing(8)
 
         self.detail_mark = QLabel("—")
-        fm = QFont(); fm.setPointSize(16); fm.setBold(True)
+        fm = QFont()
+        fm.setPointSize(16)
+        fm.setBold(True)
         self.detail_mark.setFont(fm)
         self.detail_name = QLabel("下载后显示详情")
         self.detail_name.setStyleSheet("color:#9ca3af;")

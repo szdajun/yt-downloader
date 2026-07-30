@@ -15,7 +15,7 @@ import os
 import queue
 import sys
 import time
-from typing import Callable
+from collections.abc import Callable
 
 # Windows 控制台默认 GBK: 视频标题含 emoji/特殊字 (✨❤️ 等) 时 yt-dlp 写日志
 # → UnicodeEncodeError (gbk can't encode ✨) → 下载中途崩, 只剩 .f###.mp4 片段
@@ -27,7 +27,7 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-import yt_dlp
+import yt_dlp  # noqa: E402  # delayed import — must run after stdout reconfigure above
 
 # 已知好路径优先 (Winget 版编码 bug); 不存在回退 PATH.
 _FFMPEG_DIR = r"C:\Users\18091\ffmpeg"
@@ -210,7 +210,7 @@ def _normalize_url(url: str) -> str:
     不动; 已是 /video/{id} 不动; 非 douyin 域不动; 提取不到数字 id 原样返回
     (交给 yt-dlp 如实报错). 同理 iesdouyin.com.
     """
-    from urllib.parse import urlparse, parse_qs
+    from urllib.parse import parse_qs, urlparse
     try:
         parsed = urlparse(url.strip())
     except Exception:
