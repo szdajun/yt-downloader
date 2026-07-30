@@ -36,10 +36,10 @@ YouTube / 抖音视频下载器 GUI 桌面应用。三类关键依赖:
 | 启动 GUI(双击) | `F:\wkspace\yt-downloader\run.bat` |
 | 装依赖(首次) | `cd F:\wkspace\yt-downloader && uv sync` |
 | 跑测试 | `uv run pytest -q`(目前没有,以后加) |
-| 打包单文件 exe | `uv run pyinstaller --onefile --windowed yt_downloader/app.py` |
+| 打包单文件 exe | `uv run --extra pack pyinstaller --onefile --windowed yt_downloader/app.py` |
 | 代码检查 | `uv run ruff check yt_downloader/`(以后加 ruff) |
 
-也可用 slash 命令:`/run` `/test` `/build-exe` `/lint`。
+也可用 slash 命令:`/start-gui` `/test` `/build-exe` `/lint`。
 
 ## 必须装的运行时
 
@@ -57,6 +57,6 @@ YouTube / 抖音视频下载器 GUI 桌面应用。三类关键依赖:
 
 **同一 cmd session 调两次 `uv` 会挂。** pyenv-win shim 的已知问题 — 第一个 `uv` 调用 OK,第二个挂死(console handle 没释放)。run.bat / 脚本里 `uv` 只能调一次。
 
-**pyenv-win shim 路径必须把 `D:\Python\pyenv\pyenv-win\bin` 加到 PATH。** 否则 shim 内部 `pyenv exec uv` 找不到 `pyenv` 二进制,会报 `'pyenv' is not recognized`。run.bat 已经做 PATH 自愈,新增 uv 安装位置时改 run.bat 的 candidate 列表。
+**pyenv-win shim 路径必须把 `D:\Python\.pyenv\pyenv-win\bin` 加到 PATH。** 否则 shim 内部 `pyenv exec uv` 找不到 `pyenv` 二进制,会报 `'pyenv' is not recognized`。run.bat 已经做 PATH 自愈,新增 uv 安装位置时改 run.bat 的 candidate 列表。
 
 **YouTube 反爬必须 JS 运行时。** 装 Node.js ≥22 / Deno / Bun 任一即可,优先级 deno > node > bun。
