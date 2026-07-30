@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(uv *)",
+      "Bash(git *)",
+      "Bash(ffmpeg *)",
+      "Bash(ffprobe *)",
+      "Bash(node *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(uv pip install --break-system-packages *)"
+    ]
+  },
+  "env": {
+    "PYTHONIOENCODING": "utf-8",
+    "UV_LINK_MODE": "copy",
+    "QT_AUTO_SCREEN_SCALE_FACTOR": "1"
+  }
+}
