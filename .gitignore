@@ -14,3 +14,7 @@ downloads/
 build/
 dist/
 *.egg-info/
+
+# Claude Code local config (API tokens, machine-specific overrides)
+.claude/glm.json
+.claude/settings.local.json
