@@ -4,6 +4,7 @@ subprocess 层用 mock;真实 ffmpeg 集成层 optional。
 """
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from yt_downloader.trim import remove_segment, trim
@@ -89,23 +90,39 @@ def test_remove_segment_rejects_negative_only():
 
 
 def test_remove_segment_command_construction_copy(tmp_path):
-    """precise=False 模式:三步 (切 p1, 切 p2, concat)."""
+    """precise=False 模式:三步 (切 p1, 切 p2, concat demuxer)."""
     src = tmp_path / "src.mp4"
     src.write_bytes(b"\x00" * 16)
     out = tmp_path / "out.mp4"
 
-    fake_ok = MagicMock(returncode=0, stderr="")
-    # 让 p1 和 out 都存在,这样函数走到 p2 创建那步也 OK
-    # remove_segment 在 finally 清理 p1/p2/list,所以我们只需要 mock 创建步骤成功
-    with patch("yt_downloader.trim.subprocess.run", return_value=fake_ok) as m:
-        # 让所有 subprocess.run 都成功,文件创建也模拟
-        with patch("builtins.open", new_callable=MagicMock):
-            # patch open() for the concat list file
-            result, err = remove_segment(str(src), str(out), 5.0, 10.0, precise=False)
+    def fake_subprocess(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", kwargs.get("cmd", []))
+        # p1 cut: cmd 包含 -t 5.000 → 写出 .p1.mp4
+        if "-t" in cmd and "5.000" in cmd:
+            p1 = [a for a in cmd if a.endswith(".p1.mp4")][0]
+            Path(p1).write_bytes(b"")
+        # p2 cut: cmd 包含 -ss 10.000 → 写出 .p2.mp4
+        elif "-ss" in cmd and "10.000" in cmd:
+            p2 = [a for a in cmd if a.endswith(".p2.mp4")][0]
+            Path(p2).write_bytes(b"")
+        # concat: cmd 包含 -f concat → 写出最终 out
+        elif "-f" in cmd and "concat" in cmd:
+            out_idx = cmd.index("-y") + 1
+            Path(cmd[out_idx]).write_bytes(b"")
+        return MagicMock(returncode=0, stderr="")
 
-    assert err is None or err is not None  # 不强求,这只验证命令被构造
-    # 验证至少有一次 subprocess.run 被调用
-    assert m.call_count >= 2  # 至少 p1 + p2
+    with patch("yt_downloader.trim.subprocess.run", side_effect=fake_subprocess) as m:
+        result, err = remove_segment(str(src), str(out), 5.0, 10.0, precise=False)
+
+    # 验证返回值
+    assert result == str(out)
+    assert err is None
+    # 验证 subprocess.run 被调用了 3 次 (p1 + p2 + concat)
+    assert m.call_count == 3
+    # 验证至少一次调用使用了 -f concat (concat demuxer)
+    assert any("-f" in c.args[0] and "concat" in c.args[0] for c in m.call_args_list)
+    # 验证至少一次调用使用了 -t 5.000 (p1 起始时间)
+    assert any("-t" in c.args[0] and "5.000" in c.args[0] for c in m.call_args_list)
 
 
 def test_remove_segment_precise_mode_uses_select(tmp_path):
