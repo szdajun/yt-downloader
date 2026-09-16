@@ -541,6 +541,11 @@ class MainWindow(QMainWindow):
     # ---------------- worker 槽 ----------------
     def _on_progress(self, d: dict) -> None:
         st = d.get("status")
+        if st == "douyin_extracting":
+            # 抖音取流要起浏览器 (~10s) 才拿到直链, 不提示会像卡死
+            self.status_lbl.setText("解析抖音直链 (启动浏览器)…")
+            self.speed_lbl.setText("")
+            return
         if st == "downloading":
             tot = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             got = d.get("downloaded_bytes") or 0

@@ -6,6 +6,11 @@
   - download_sync(url, out_dir, fmt, q, cookies_browser): queue 适配
     (向后兼容批量/旧调用), 内部转调 download().
 
+两条下载通路 (download() 按域名自动分流):
+  - YouTube 等: 走 yt-dlp 原生 extractor (需代理, 见 _make_opts 的 direct).
+  - 抖音: 走浏览器取流 (_download_douyin) — yt-dlp 的 DouyinIE 已被抖音
+    ArgusSecurityPlugin 签名墙打死, 详见 douyin_browser 模块 docstring.
+
 最终文件路径检测: 记录下载前 output_dir 最新 mtime, 下载后取 mtime 更新的
 那个媒体文件 (不依赖 yt-dlp 内部命名/合并后改名细节, 最稳).
 """
@@ -28,6 +33,13 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 import yt_dlp  # noqa: E402  # delayed import — must run after stdout reconfigure above
+
+from .douyin_browser import (  # noqa: E402  # 同上, 必须在 stdout reconfigure 之后
+    DouyinBrowserUnavailable,
+    extract_douyin,
+    is_douyin_url,
+    pick_best_gear,
+)
 
 # 已知好路径优先 (Winget 版编码 bug); 不存在回退 PATH.
 _FFMPEG_DIR = r"C:\Users\18091\ffmpeg"
@@ -57,7 +69,8 @@ def is_audio_format(label: str) -> bool:
 
 def _make_opts(output_dir: str, format_label: str, hook,
                cookies_browser: str = "", cookies_file: str = "",
-               outtmpl: str | None = None, overwrites: bool | None = None) -> dict:
+               outtmpl: str | None = None, overwrites: bool | None = None,
+               direct: bool = False) -> dict:
     audio = is_audio_format(format_label)
     opts = {
         "format": FORMATS.get(format_label, FORMATS["最高画质 (mp4)"]),
@@ -89,6 +102,11 @@ def _make_opts(output_dir: str, format_label: str, hook,
             "preferredcodec": "m4a",
             "preferredquality": "0",   # 最佳
         }]
+    if direct:
+        # 抖音对非中国大陆 IP 地理封锁 (web API 与 douyinvod CDN 均是), 而本机
+        # HTTP(S)_PROXY 指向境外节点 (实测出口大阪). yt-dlp 里 proxy="" 会被翻成
+        # __noproxy__ = 强制直连; YouTube 保持继承环境代理 (它反而必须走代理).
+        opts["proxy"] = ""
     if cookies_file:             # cookies.txt (Netscape) — 最通用, 绕所有浏览器加密
         opts["cookiefile"] = cookies_file
     elif cookies_browser:        # Firefox 自动读 (chrome/edge 新版 DPAPI/App-Bound 加密读不出)
@@ -192,12 +210,7 @@ def _unique_force_outtmpl(url: str, output_dir: str, format_label: str,
         return None
     base, _ext = os.path.splitext(default_path)
     ext = ".m4a" if is_audio_format(format_label) else ".mp4"
-    candidate = base + ext
-    n = 0
-    while os.path.exists(candidate):
-        n += 1
-        candidate = f"{base}({n}){ext}"
-    return candidate   # 字面路径, yt-dlp 原样用作 outtmpl (无 %() 字段)
+    return _free_slot(base + ext)   # 字面路径, yt-dlp 原样用作 outtmpl (无 %() 字段)
 
 
 def _normalize_url(url: str) -> str:
@@ -229,6 +242,99 @@ def _normalize_url(url: str) -> str:
     return url
 
 
+def _free_slot(candidate: str) -> str:
+    """candidate 已占用时返回 base(1).ext / base(2).ext … 第一个空闲名."""
+    base, ext = os.path.splitext(candidate)
+    n = 0
+    while os.path.exists(candidate):
+        n += 1
+        candidate = f"{base}({n}){ext}"
+    return candidate
+
+
+# ---- 抖音 (浏览器取流) ----
+# 2026-09 起抖音给 web detail API 加了 ArgusSecurityPlugin 签名墙 (要 Uifid 请求头
+# + a_bogus 签名). yt-dlp 的 DouyinIE 两样都没实现 → 恒定 403, 且 master 依然如此,
+# 升级 yt-dlp 无效. 详见 douyin_browser 模块 docstring.
+# 这里只负责把浏览器取到的直链交给 yt-dlp 下载 (直连 + Referer 绕 CDN 防盗链).
+_DOUYIN_REFERER = "https://www.douyin.com/"
+
+
+def _douyin_base_name(video, output_dir: str) -> str:
+    """算抖音产物文件名主干 (不含扩展名).
+
+    借 yt-dlp 的 prepare_filename 套用项目统一的 `%(title).100B [%(id)s].%(ext)s` —
+    100 字节截断与 windowsfilenames 净化都由 yt-dlp 做, 保证与 YouTube 路径命名一致,
+    下游 _find_by_id 照样能按 [id] 定位到文件.
+    """
+    opts = _make_opts(output_dir, "最高画质 (mp4)", _noop, direct=True)
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        name = ydl.prepare_filename(
+            {"title": video.title, "id": video.vid, "ext": "mp4"})
+    return os.path.splitext(name)[0]
+
+
+def _download_douyin(url: str, output_dir: str, format_label: str, *,
+                     on_progress, on_error, force: bool) -> tuple[str | None, bool]:
+    """抖音下载: 浏览器取直链 → yt-dlp 直连 CDN 下载.
+
+    返回约定与 download() 一致: (final_path | None, skipped).
+    """
+    hook = on_progress or _noop
+    before = _newest_mtime(output_dir)
+    hook({"status": "douyin_extracting"})   # 浏览器冷启动约 10s, 给 UI 一个反馈
+
+    try:
+        video = extract_douyin(url)
+    except DouyinBrowserUnavailable as e:
+        if on_error:
+            on_error(f"{url}\n    [抖音] 浏览器取流不可用: {e}")
+        return None, False
+    except Exception as e:
+        if on_error:
+            on_error(f"{url}\n    [抖音] 取流失败: {type(e).__name__}: {e}")
+        return None, False
+
+    if not video:
+        if on_error:
+            on_error(f"{url}\n    [抖音] 未返回可用视频数据 — 风控拦截 / 作品不存在 / "
+                     "该作品仅登录可见. 稍后重试或先在浏览器里打开一次该视频.")
+        return None, False
+
+    gear = pick_best_gear(video.gears, format_label)
+    if not gear:
+        if on_error:
+            on_error(f"{url}\n    [抖音] 所有档位都没有可下载地址")
+        return None, False
+
+    audio = is_audio_format(format_label)
+    final = _douyin_base_name(video, output_dir) + (".m4a" if audio else ".mp4")
+    if force:
+        final = _free_slot(final)          # 不覆盖旧文件: 顺延成 a(1)/a(2)
+    elif os.path.exists(final):
+        return final, True                 # 增量跳过 (与 YouTube 路径一致)
+
+    # 音频预设: 先下视频档, 再由 FFmpegExtractAudio 抽成 m4a (yt-dlp 会删掉中间 mp4)
+    dl_target = os.path.splitext(final)[0] + ".mp4"
+    opts = _make_opts(output_dir, format_label, hook, direct=True, outtmpl=dl_target)
+    opts["http_headers"] = {"Referer": _DOUYIN_REFERER}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([gear.url])
+    except Exception as e:
+        if on_error:
+            # 直链带时效 token, 取流与下载间隔过久会 403 — 重试即可.
+            on_error(f"{url}\n    [抖音] 直链下载失败: {e}\n"
+                     "      (取流与下载间隔过久会使 token 过期, 重试一次即可)")
+        return None, False
+
+    if os.path.exists(final):
+        return final, False
+    time.sleep(0.5)                        # ffmpeg 抽音频可能延迟落盘
+    found = _find_final(output_dir, before)
+    return found, (found is None)
+
+
 def download(url: str, output_dir: str, format_label: str, *,
              on_progress: Callable[[dict], None] | None = None,
              on_error: Callable[[str], None] | None = None,
@@ -244,6 +350,11 @@ def download(url: str, output_dir: str, format_label: str, *,
     """
     os.makedirs(output_dir, exist_ok=True)
     url = _normalize_url(url)   # 搜索页 modal_id → /video/{id} 等 (抖音误粘修正)
+    if is_douyin_url(url):
+        # 抖音走浏览器取流 — yt-dlp 的 DouyinIE 已被抖音签名墙打死 (见 _download_douyin)
+        return _download_douyin(url, output_dir, format_label,
+                                on_progress=on_progress, on_error=on_error,
+                                force=force)
     before = _newest_mtime(output_dir)
     hook = on_progress or _noop
     outtmpl = None
