@@ -23,7 +23,7 @@ from yt_downloader.verify import (
 # ---- 阈值常量钉死 ----
 def test_thresholds_constants():
     assert THRESH_SHORT_SIDE == 720
-    assert THRESH_BITRATE == 5_000_000
+    assert THRESH_BITRATE == 2_000_000
     assert THRESH_DURATION == 30.0
 
 
@@ -58,8 +58,32 @@ def test_short_side_ok_below_threshold():
 
 
 def test_bitrate_ok_at_threshold():
-    assert _r(bit_rate=5_000_000).bitrate_ok is True
-    assert _r(bit_rate=4_999_999).bitrate_ok is False
+    assert _r(bit_rate=2_000_000).bitrate_ok is True
+    assert _r(bit_rate=1_999_999).bitrate_ok is False
+
+
+def test_bitrate_threshold_sits_in_douyin_natural_gap():
+    """2.0 Mbps 不是拍脑袋: 它落在抖音实测的天然断层 1785~2119 kbps 之间.
+
+    2026-09-17 实测抖音码率阶梯(样本 7685199522498698100, 1080x1920):
+      1080p 档 2119 / 2175 / 2834 / 2898 kbps  (容器实测 2.90 Mbps)
+       720p 档  618 ~ 1785 kbps
+    门槛落断层里 → 放行 1080p、挡住 720p。720p 的短边恰好是 720 能过分辨率
+    门槛, 只能靠码率挡 —— 所以这个数直接决定下游拿到 1080p 还是 720p。
+    """
+    douyin_1080p = (2_119_000, 2_175_000, 2_834_000, 2_898_000)
+    douyin_720p = (618_000, 1_650_000, 1_785_000)
+    for br in douyin_1080p:
+        assert _r(bit_rate=br).bitrate_ok is True, f"1080p {br} 应放行"
+    for br in douyin_720p:
+        assert _r(bit_rate=br).bitrate_ok is False, f"720p {br} 应挡住"
+
+
+def test_failures_bitrate_message_follows_threshold():
+    """报错文案必须跟着常量走 —— 这里硬编码过一次, 改门槛最容易漏."""
+    msg = next(f for f in _r(bit_rate=1_000_000).failures if "码率" in f)
+    assert f"< {THRESH_BITRATE / 1e6:g} Mbps" in msg
+    assert "5 Mbps" not in msg
 
 
 def test_duration_ok_at_threshold():
@@ -80,7 +104,7 @@ def test_ok_no_video():
 
 
 def test_failures_lists_each_failing_criterion():
-    # 短边 < 720, 码率 < 5Mbps, 时长 < 30s — 三项都不达标
+    # 短边 < 720, 码率 < 2Mbps, 时长 < 30s — 三项都不达标
     r = _r(width=640, height=360, duration=10.0, bit_rate=1_000_000)
     assert r.ok is False
     assert len(r.failures) == 3

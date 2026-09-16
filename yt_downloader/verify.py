@@ -1,8 +1,8 @@
 """ffprobe 准入门槛验证.
 
 下载后调用 ffprobe 读取规格, 对照 CLAUDE.md 钉死的源素材准入门槛:
-  - 短边像素 ≥ 720   (平台最低 720×1280 / 1280×720, 低于此主管线 upscale 不补细节)
-  - 码率     ≥ 5 Mbps (低于此运动场景明显压缩痕迹/色块, 平台传上去糊)
+  - 短边像素 ≥ 720    (平台最低 720×1280 / 1280×720, 低于此主管线 upscale 不补细节)
+  - 码率     ≥ 2 Mbps (2026-09-17 从 5 下调以适配抖音源, 详见 THRESH_BITRATE 注释)
   - 时长     ≥ 30s    (太短不够完播率)
 
 ffmpeg/ffprobe 已知好路径优先于 PATH (Winget 版有编码 bug),
@@ -26,7 +26,14 @@ def _ffprobe_path() -> str:
 
 # ---- 准入门槛 (钉死, 与 fitness-video-pipeline CLAUDE.md 一致) ----
 THRESH_SHORT_SIDE = 720        # 短边像素
-THRESH_BITRATE = 5_000_000     # 5 Mbps
+# 2 Mbps — 2026-09-17 用户拍板从 5 Mbps 下调, 以适配抖音源的现实。
+# 抖音 1080p 档实测 2119~2898 kbps(容器实测 2.90 Mbps)、720p 档最高 1785 kbps,
+# 2.0 正落在 1785~2119 这个天然断层里: 放行 1080p、挡住 720p。720p 的短边恰好
+# 是 720 能过分辨率门槛, 只能靠码率挡 —— 所以这个数直接决定下游拿到哪个档。
+# ⚠ 下游 fitness-video-pipeline(CLAUDE.md + coach-video-process/SKILL.md)有同值
+#   硬门槛, 且「不达标直接放弃不硬上」。改这里必须同步改那边, 否则抖音文件在本
+#   项目判达标、到下游被丢, 下载白费。
+THRESH_BITRATE = 2_000_000     # 2 Mbps
 THRESH_DURATION = 30.0         # 秒 (Shorts 最低)
 
 
@@ -72,7 +79,7 @@ class ProbeResult:
         if not self.short_side_ok:
             f.append(f"短边 {self.short_side} < {THRESH_SHORT_SIDE}")
         if not self.bitrate_ok:
-            f.append(f"码率 {self.bit_rate / 1e6:.1f} < 5 Mbps")
+            f.append(f"码率 {self.bit_rate / 1e6:.1f} < {THRESH_BITRATE / 1e6:g} Mbps")
         if not self.duration_ok:
             f.append(f"时长 {self.duration:.0f}s < 30s")
         return f

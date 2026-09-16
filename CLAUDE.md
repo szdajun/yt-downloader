@@ -9,7 +9,7 @@ YouTube / 抖音视频下载器 GUI 桌面应用。三类关键依赖:
 - **yt-dlp** — 下载引擎 + 格式协商
 - **Node.js ≥22** — YouTube 2025+ n-challenge 签名求解器(必装,否则「No video formats found」)
 
-业务核心:下载后 ffprobe 验证准入门槛(短边 ≥720px / 码率 ≥5Mbps / 时长 ≥30s)+ 瑜伽源衣着预审。产物是下游健身主管线 `F:\wkspace\fitness-video-pipeline` 的视频源。
+业务核心:下载后 ffprobe 验证准入门槛(短边 ≥720px / 码率 ≥2Mbps / 时长 ≥30s)+ 瑜伽源衣着预审。产物是下游健身主管线 `F:\wkspace\fitness-video-pipeline` 的视频源。
 
 ## 架构速览
 
@@ -67,7 +67,7 @@ YouTube / 抖音视频下载器 GUI 桌面应用。三类关键依赖:
 
 **抖音必须直连(不能走代理)。** 抖音对非中国大陆 IP 地理封锁(web API 与 douyinvod CDN 均是)。本机 `HTTP(S)_PROXY` 指向境外节点, 故抖音路径一律 `proxy=""`, 浏览器加 `--no-proxy-server`。YouTube 反之必须走代理 —— 分流在 `_make_opts(direct=...)`。
 
-**抖音源普遍到不了 5Mbps 准入门槛。** 抖音最高档 1080p 实测约 2.9Mbps(整条阶梯天花板), 会被 `verify.py` 的 `bitrate_ok` 拒掉。这是**抖音源本身特性**, 不是下载 bug; 门槛暂按原样保留(2026-09-17 决策), 后续看样本分布再定。
+**抖音源到不了旧的 5Mbps 门槛 → 2026-09-17 已下调到 2Mbps。** 抖音码率天花板就在那: 实测 1080p 档 2119~2898 kbps(容器实测 2.90 Mbps)、720p 档最高 1785。2.0 落在 **1785~2119 这个天然断层**里, 放行 1080p、挡住 720p —— 720p 的短边恰好是 720 能过分辨率门槛, 只能靠码率挡, 所以这个数直接决定下游拿到哪个档。⚠ 下游 `fitness-video-pipeline`(`CLAUDE.md` + `.claude/skills/coach-video-process/SKILL.md`)有同值硬门槛且「不达标直接放弃不硬上」, **两边必须同步改**, 否则这边判达标、下游丢掉, 下载白费。
 
 **`.bat` 必须 CRLF 行尾。** cmd.exe 按字节偏移回读批处理文件,LF-only 的 run.bat 配上 `goto` 标签 + 括号块会让 cmd 算错偏移、回头把前面几行吃掉开头字符重执行(实测 7 个 `'tle' is not recognized` / `'/d' is not recognized`),后果是 `cd /d "%~dp0"` **静默失效**。已加 `.gitattributes` 锁 `*.bat text eol=crlf`。另注意:用 Python 读写 .bat 要 `read_bytes().decode()`,**别用 `read_text()`** —— 它默认换行归一,会把 CRLF 悄悄变回 LF。
 

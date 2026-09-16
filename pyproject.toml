@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "yt-downloader"
 version = "1.2.0"
-description = "YouTube 视频下载器 — 高清下载 + 准入门槛自动验证 (短边≥720 / 码率≥5Mbps / 时长≥30s) + 瑜伽源衣着预审"
+description = "YouTube 视频下载器 — 高清下载 + 准入门槛自动验证 (短边≥720 / 码率≥2Mbps / 时长≥30s) + 瑜伽源衣着预审"
 requires-python = ">=3.11"
 authors = [{name = "User"}]
 keywords = ["youtube", "downloader", "yt-dlp", "video"]
