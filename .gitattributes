@@ -1,0 +1,4 @@
+# .bat 必须 CRLF: cmd.exe 按字节偏移回读批处理文件, LF 版配上 goto/括号块会算错
+# 偏移、回头重执行被吃掉开头字符的行 (实测 7 处). 详见 CLAUDE.md 踩坑速查.
+*.bat text eol=crlf
+*.cmd text eol=crlf

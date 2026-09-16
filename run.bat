@@ -50,13 +50,17 @@ echo.
 "%UV%" run python -m yt_downloader.app
 set "RC=%errorlevel%"
 
-if not "%RC%"=="0" (
-    echo.
-    echo [ERROR] GUI exited with code %RC%.
-    echo Common causes:
-    echo   - Missing Node.js / Deno / Bun (YouTube sign-in challenge needs a JS runtime)
-    echo   - PySide6 platform plugin failed (e.g. no display in a service session)
-    echo Re-run from a regular desktop session for the GUI window.
-    pause
-)
+rem NOTE: keep this error text OUT of an if (...) block. cmd treats an unescaped
+rem ")" inside an echo as the block terminator: the block is truncated there and
+rem the leftover lines fall through to top level, running unconditionally.
+rem Early-exit + flat layout avoids that whole class of bug.
+if "%RC%"=="0" exit /b 0
+
+echo.
+echo [ERROR] GUI exited with code %RC%.
+echo Common causes:
+echo   - Missing Node.js / Deno / Bun (YouTube sign-in challenge needs a JS runtime)
+echo   - PySide6 platform plugin failed (e.g. no display in a service session)
+echo Re-run from a regular desktop session for the GUI window.
+pause
 exit /b %RC%
