@@ -18,8 +18,9 @@ import tempfile
 
 from .verify import probe
 
-# 已知好路径优先 (Winget 版编码兼容问题); 不存在则回退 PATH. 同 verify.py / trim.py.
-_FFMPEG_DIR = r"C:\Users\18091\ffmpeg"
+# 已知好路径优先 (Winget 版编码兼容问题); 不存在则回退 PATH。
+# env YT_FFMPEG_DIR 可覆盖; 默认 ~/ffmpeg —— 别写死用户名/盘符。同 verify.py / trim.py。
+_FFMPEG_DIR = os.environ.get("YT_FFMPEG_DIR") or os.path.expanduser(r"~\ffmpeg")
 
 
 def _ffmpeg() -> str:
@@ -29,7 +30,12 @@ def _ffmpeg() -> str:
 
 def _fitness_root() -> str:
     """fitness-video-pipeline 根目录 (深度扫描用). env 可覆盖; 别的机器没有则深度按钮不出现."""
-    return os.environ.get("YT_FITNESS_ROOT", r"F:\wkspace\fitness-video-pipeline")
+    env = os.environ.get("YT_FITNESS_ROOT")
+    if env:
+        return env
+    # 默认取本仓库的兄弟目录 —— 与 cwd 无关, 整仓搬到别处仍能定位 (别写死盘符)
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(os.path.dirname(repo_root), "fitness-video-pipeline")
 
 
 def fitness_env() -> tuple[str, str] | None:

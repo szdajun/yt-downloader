@@ -182,7 +182,7 @@ def test_probe_integration_real_video(skip_if_no_ffprobe, tmp_path):
     from pathlib import Path
     candidates = [
         Path.home() / "Downloads",
-        Path(r"F:\wkspace\yt-downloader\yt_downloader\assets"),
+        Path(__file__).resolve().parents[1] / "yt_downloader" / "assets",
     ]
     video = None
     for d in candidates:

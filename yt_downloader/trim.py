@@ -12,7 +12,8 @@ from __future__ import annotations
 import os
 import subprocess
 
-_FFMPEG_DIR = r"C:\Users\18091\ffmpeg"
+# env YT_FFMPEG_DIR 可覆盖; 默认 ~/ffmpeg —— 别写死用户名/盘符。同 verify.py。
+_FFMPEG_DIR = os.environ.get("YT_FFMPEG_DIR") or os.path.expanduser(r"~\ffmpeg")
 
 
 def _ffmpeg() -> str:

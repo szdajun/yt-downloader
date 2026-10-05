@@ -5,32 +5,39 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
 
 import pytest
 
+# ffmpeg 目录约定同 yt_downloader.verify / trim / yoga_check:
+# env YT_FFMPEG_DIR 可覆盖; 默认 ~/ffmpeg (可移植, 别写死用户名/盘符); 都没有则回退 PATH。
+_FFMPEG_DIR = os.environ.get("YT_FFMPEG_DIR") or os.path.expanduser(r"~\ffmpeg")
+
+
+def _have(name: str) -> bool:
+    return shutil.which(name) is not None or os.path.exists(
+        os.path.join(_FFMPEG_DIR, f"{name}.exe")
+    )
+
 
 @pytest.fixture
 def ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None or shutil.which(
-        r"C:\Users\18091\ffmpeg\ffmpeg.exe"
-    ) is not None
+    return _have("ffmpeg")
 
 
 @pytest.fixture
 def ffprobe_available() -> bool:
-    return shutil.which("ffprobe") is not None or shutil.which(
-        r"C:\Users\18091\ffmpeg\ffprobe.exe"
-    ) is not None
+    return _have("ffprobe")
 
 
 @pytest.fixture
 def skip_if_no_ffmpeg(ffmpeg_available: bool) -> None:
     if not ffmpeg_available:
-        pytest.skip("ffmpeg not available on PATH or at C:\\Users\\18091\\ffmpeg")
+        pytest.skip(f"ffmpeg not available on PATH or at {_FFMPEG_DIR}")
 
 
 @pytest.fixture
 def skip_if_no_ffprobe(ffprobe_available: bool) -> None:
     if not ffprobe_available:
-        pytest.skip("ffprobe not available on PATH or at C:\\Users\\18091\\ffmpeg")
+        pytest.skip(f"ffprobe not available on PATH or at {_FFMPEG_DIR}")

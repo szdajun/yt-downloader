@@ -15,8 +15,9 @@ import os
 import subprocess
 from dataclasses import dataclass
 
-# 已知好路径优先 (Winget 版有编码兼容问题); 不存在则回退 PATH.
-_FFMPEG_DIR = r"C:\Users\18091\ffmpeg"
+# 已知好路径优先 (Winget 版有编码兼容问题); 不存在则回退 PATH。
+# env YT_FFMPEG_DIR 可覆盖; 默认 ~/ffmpeg —— 别写死用户名/盘符, 否则仓库只在本机能跑。
+_FFMPEG_DIR = os.environ.get("YT_FFMPEG_DIR") or os.path.expanduser(r"~\ffmpeg")
 
 
 def _ffprobe_path() -> str:
