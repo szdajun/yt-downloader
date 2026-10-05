@@ -55,6 +55,25 @@ YouTube / 抖音 / Pornhub 视频下载器 GUI 桌面应用。四类关键依赖
 | **ffmpeg** | 视频合流 / 裁剪 | 下载失败或合并阶段报错 |
 | **ffprobe** | 准入门槛验证 | 验证阶段报 ffprobe not found |
 
+## 记忆同步约定
+
+项目记忆有**两份**,活的那份在仓库外:
+
+| 位置 | 角色 |
+|---|---|
+| `~/.claude/projects/F--wkspace-yt-downloader/memory/` | **活文件** — Claude 读写的就是这里 |
+| `<repo>/memory/` | **仓库内快照** — 纳入版本控制, 关机/换机不丢 |
+
+约定(同 `fitness-video-pipeline`, 照抄即可):
+
+- **写完记忆要同步** —— 单向, 活 → 仓库:
+  `cp ~/.claude/projects/F--wkspace-yt-downloader/memory/*.md <repo>/memory/`
+- 连同代码一起提交, 提交信息用 `@claude-env:` 前缀(与 docs/ 那类同)。
+- 两侧**会漂移**: 仓库里那份是快照, 一切以 `~/.claude` 那份为准; 改了记忆不 sync, 仓库里的就是旧的。
+- `MEMORY.md` 是索引 —— 每新增一条记忆要在里面加一行 `- [标题](file.md) — 一句话`, 索引本身也在同步范围内。
+- 提交前扫一遍凭证:`grep -rniE 'sk-[a-z0-9]{10,}|api[_-]?key|token\s*[:=]|password' memory/`。
+  (记忆里出现过 `?token=&lang=zh` 这种**空参数误报**, 属正常, 别当成泄露。)
+
 ## 本项目踩坑速查
 
 **`chcp 65001 >nul` 与 `uv run` 不兼容。** 切换 UTF-8 码页会干扰 pyenv-win shim 的 stdio 缓冲,导致 `uv run python -m ...` 无输出挂起。run.bat 已经去掉这行,不要再加回来。
