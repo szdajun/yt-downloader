@@ -546,6 +546,11 @@ class MainWindow(QMainWindow):
             self.status_lbl.setText("解析抖音直链 (启动浏览器)…")
             self.speed_lbl.setText("")
             return
+        if st == "pornhub_extracting":
+            # 反爬维护页/无 token 直链都要重试, 冷启动可能十几秒 (见 pornhub 模块)
+            self.status_lbl.setText("解析 Pornhub 直链 (反爬重试中)…")
+            self.speed_lbl.setText("")
+            return
         if st == "downloading":
             tot = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             got = d.get("downloaded_bytes") or 0

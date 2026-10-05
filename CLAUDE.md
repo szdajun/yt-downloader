@@ -4,22 +4,24 @@ Claude Code 项目级配置 — `F:\wkspace\yt-downloader` 自动加载。
 
 ## 项目身份
 
-YouTube / 抖音视频下载器 GUI 桌面应用。三类关键依赖:
+YouTube / 抖音 / Pornhub 视频下载器 GUI 桌面应用。四类关键依赖:
 - **PySide6 (Qt6)** — 主窗口 + QThread 子线程模型
 - **yt-dlp** — 下载引擎 + 格式协商
 - **Node.js ≥22** — YouTube 2025+ n-challenge 签名求解器(必装,否则「No video formats found」)
+- **curl_cffi** — Pornhub 分片下载(该 CDN 只放行带 Chrome TLS 指纹的客户端,见下)
 
 业务核心:下载后 ffprobe 验证准入门槛(短边 ≥720px / 码率 ≥2Mbps / 时长 ≥30s)+ 瑜伽源衣着预审。产物是下游健身主管线 `F:\wkspace\fitness-video-pipeline` 的视频源。
 
 ## 架构速览
 
-入口 `yt_downloader/app.py:main()`。包结构(10 个模块):
+入口 `yt_downloader/app.py:main()`。包结构(11 个模块):
 
 | 模块 | 职责 |
 |---|---|
 | `app.py` | 主窗口 + 入口(QMainWindow + 信号槽) |
-| `downloader.py` | yt-dlp 封装 + 格式映射(FORMATS/AUDIO_SUFFIXES) + 抖音/YouTube 分流 |
+| `downloader.py` | yt-dlp 封装 + 格式映射(FORMATS/AUDIO_SUFFIXES) + 抖音/Pornhub/YouTube 分流 |
 | `douyin_browser.py` | 抖音浏览器取流(Playwright 驱动系统 Chrome/Edge, 绕抖音签名墙) |
+| `pornhub.py` | Pornhub 取流(页面 flashvars 的 HLS + curl_cffi 分片, 绕 yt-dlp 的 PhantomJS 死路) |
 | `verify.py` | ffprobe 准入门槛(ProbeResult + probe()) |
 | `workers.py` | QThread 子线程 + Qt Signal(BatchWorker / DownloadWorker / TrimWorker / YogaFrameWorker / DeepCheckWorker) |
 | `dialogs.py` | 弹窗(BatchDialog / TrimDialog / YogaReviewDialog) |
@@ -72,3 +74,15 @@ YouTube / 抖音视频下载器 GUI 桌面应用。三类关键依赖:
 **`.bat` 必须 CRLF 行尾。** cmd.exe 按字节偏移回读批处理文件,LF-only 的 run.bat 配上 `goto` 标签 + 括号块会让 cmd 算错偏移、回头把前面几行吃掉开头字符重执行(实测 7 个 `'tle' is not recognized` / `'/d' is not recognized`),后果是 `cd /d "%~dp0"` **静默失效**。已加 `.gitattributes` 锁 `*.bat text eol=crlf`。另注意:用 Python 读写 .bat 要 `read_bytes().decode()`,**别用 `read_text()`** —— 它默认换行归一,会把 CRLF 悄悄变回 LF。
 
 **括号块内 `echo` 里的 `)` 是块结束符。** `if ... ( ... echo X (foo) ... )` 里那个 `)` 会被 cmd 当成 `if` 块的结束符,**开头的 `(` 不提供嵌套保护**:块被截断在该行,剩余行掉到顶层**无条件执行**。所以错误提示文案别放进 `if (...)` 块 —— 用 `if "%RC%"=="0" exit /b 0` 提前退出 + 平铺结构(与 uv-not-found 那段一致)。
+
+**Pornhub 的 yt-dlp 提取器死在 PhantomJS, 别再查 cookie / 升 yt-dlp。** `PornHubIE` 依赖已停更的 PhantomJS 去重放一个反爬 JS 挑战(页面里的 `<body onload="go()">` + `document.cookie=...`), 本机没有也装不动 → 直接 `ERROR: [PornHub] PhantomJS not found`。`pornhub.py` 另起一条路: 抓页面里 `var flashvars_<n> = {...}` 的 `mediaDefinitions`, 取 `format: "hls"` 那条的 `master.m3u8`, 再经 ffmpeg 本地 remux。**`format: "mp4"` + `remote: true` 那条(`cn.pornhub.com/video/get_media`)是死路, 403, 直接丢。**
+
+**Pornhub 四个实测坑(缺一个就 410/412):**
+1. **CDN 认页面 session 的 cookie。** 分片请求必须带抓页面那次的 session cookie, 拿全新 session 去取同一个 m3u8 → `410 Gone`。
+2. **页面 token 会失效。** 有些页面加载出的 HLS URL 是无 token 的(`validfrom=validto=0`), 取回来是 `412 request incorrect`。所以要**逐档位降级重试 + 失败就重抓页面换新 token**(`extract_pornhub` 里的 12 轮)。
+3. **CDN 有每 IP 并发上限。** 8 路并发分片会随机 410, 3 路串行全 200 —— 用 4 并发 + 410/429/403 退避。`_CONCURRENCY = 4` 别往上调。
+4. **ffmpeg 自己的 HTTP 栈过不了 CDN 检查** —— 同一个 URL curl_cffi 200、ffmpeg 410。所以**分片用 curl_cffi 落到本地文件**, 再把 playlist 改写成指向本地文件(`rewrite_local`), ffmpeg 只做 `-c copy` remux。curl_cffi 的 `impersonate="chrome"`(TLS 指纹)是唯一能过 CDN 的客户端。
+
+**Pornhub 必须走代理(与抖音正好相反)。** 抖音 `proxy=""` 直连;Pornhub 走 `HTTP(S)_PROXY`。分流同样在 `_make_opts(direct=...)` 之外单开 `_download_pornhub`, 别把两者的代理设定搞混。
+
+**Pornhub 产物只用 viewkey 命名(`{viewkey}.mp4` / `.m4a`)。** 敏感源, 标题一律不进文件名、不进对话、不进命令 —— 见 `content-filter-1301-handling` 约定。

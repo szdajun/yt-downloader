@@ -22,6 +22,11 @@ dependencies = [
     # extractor 已被抖音 ArgusSecurityPlugin 签名墙打死). 无需 playwright install:
     # 直接用本机浏览器, 不进 onefile 打包体积.
     "playwright>=1.40",
+    # 浏览器 TLS 指纹模拟 — yt-dlp 部分 extractor 会自动请求 impersonate
+    # (缺它只 WARNING 降级, 但查 TLS 指纹的站会 403). 装上后无需任何配置自动生效.
+    # 上界 <0.16: yt-dlp/networking/_curlcffi.py 版本闸只认 0.10.x~0.15.x,
+    # 更新版本会被判 unsupported 而整组目标 unavailable (实测 0.16.3 踩坑).
+    "curl-cffi>=0.10,<0.16",
 ]
 
 [project.optional-dependencies]

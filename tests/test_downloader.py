@@ -20,6 +20,7 @@ from yt_downloader.downloader import (
     download,
     is_audio_format,
 )
+from yt_downloader.pornhub import PornhubUnavailable, PornhubVideo
 
 
 # ---- FORMATS 字典结构 ----
@@ -232,3 +233,144 @@ def test_download_douyin_audio_uses_m4a_target(tmp_path, monkeypatch):
     assert skipped is False
     assert path is not None and path.endswith(".m4a")
     assert os.path.exists(path)
+
+
+# ---- download() Pornhub 分流 ----
+PH_URL = "https://cn.pornhub.com/view_video.php?viewkey=697c4901ab738"
+
+
+def _ph_video(vid="697c4901ab738", dur=1614, quality=1080):
+    return PornhubVideo(viewkey=vid, session=None, master="https://cdn/x/master.m3u8",
+                        duration=dur, quality=quality)
+
+
+def test_download_routes_pornhub_to_hls_path(tmp_path, monkeypatch):
+    """Pornhub URL 不得落到 yt-dlp 通路 (其 PornHubIE 死在 PhantomJS 反爬挑战)."""
+    seen = {}
+
+    def fake_extract(url, **kw):
+        seen["url"] = url
+        raise PornhubUnavailable("页面取不到 (403)")
+
+    monkeypatch.setattr(downloader, "extract_pornhub", fake_extract)
+    calls = _patch_fake_ydl(monkeypatch)
+    errs = []
+    path, skipped = download(PH_URL, str(tmp_path), "最高画质 (mp4)",
+                             on_error=errs.append)
+    assert seen["url"] == PH_URL
+    assert calls == []                      # 关键: 没走 yt-dlp
+    assert path is None and skipped is False
+    assert errs and "Pornhub" in errs[0]
+
+
+def test_download_routes_pornhub_embed_url(tmp_path, monkeypatch):
+    """/embed/<id> 也要认出来走 HLS 通路, 产物名同样只用 viewkey."""
+    seen = {}
+
+    def fake_extract(url, **kw):
+        seen["url"] = url
+        return _ph_video()
+
+    monkeypatch.setattr(downloader, "extract_pornhub", fake_extract)
+    monkeypatch.setattr(downloader, "download_hls",
+                        lambda video, dest, **kw: open(dest, "wb").write(b"f") or dest)
+    embed = "https://www.pornhub.com/embed/697c4901ab738"
+    path, skipped = download(embed, str(tmp_path), "最高画质 (mp4)")
+    assert seen["url"] == embed
+    assert path == str(tmp_path / "697c4901ab738.mp4")
+
+
+def test_download_pornhub_writes_id_named_file(tmp_path, monkeypatch):
+    """产物只用 viewkey 命名 —— 标题不得进文件名 (敏感源约定)."""
+    monkeypatch.setattr(downloader, "extract_pornhub", lambda url, **kw: _ph_video())
+    seen = {}
+
+    def fake_hls(video, dest, **kw):
+        seen["dest"] = dest
+        seen["audio_only"] = kw.get("audio_only")
+        with open(dest, "wb") as f:
+            f.write(b"fake")
+        return dest
+
+    monkeypatch.setattr(downloader, "download_hls", fake_hls)
+    path, skipped = download(PH_URL, str(tmp_path), "最高画质 (mp4)")
+    assert skipped is False
+    assert path == str(tmp_path / "697c4901ab738.mp4")
+    assert os.path.basename(path) == "697c4901ab738.mp4"
+    assert seen["dest"] == path and seen["audio_only"] is False
+
+
+def test_download_pornhub_skips_existing_file(tmp_path, monkeypatch):
+    """目标文件已存在 → 增量跳过, 一次都不下 (与 YouTube/抖音一致)."""
+    monkeypatch.setattr(downloader, "extract_pornhub", lambda url, **kw: _ph_video())
+    existing = tmp_path / "697c4901ab738.mp4"
+    existing.write_bytes(b"old")
+    calls = []
+    monkeypatch.setattr(downloader, "download_hls",
+                        lambda *a, **kw: calls.append(a))
+
+    path, skipped = download(PH_URL, str(tmp_path), "最高画质 (mp4)")
+    assert skipped is True
+    assert path == str(existing)
+    assert calls == []
+
+
+def test_download_pornhub_force_bumps_to_free_slot(tmp_path, monkeypatch):
+    """force → 不顺延覆盖旧文件, 落到空闲的 a(1)."""
+    monkeypatch.setattr(downloader, "extract_pornhub", lambda url, **kw: _ph_video())
+    (tmp_path / "697c4901ab738.mp4").write_bytes(b"old")
+
+    def fake_hls(video, dest, **kw):
+        with open(dest, "wb") as f:
+            f.write(b"new")
+        return dest
+
+    monkeypatch.setattr(downloader, "download_hls", fake_hls)
+    path, skipped = download(PH_URL, str(tmp_path), "最高画质 (mp4)", force=True)
+    assert skipped is False
+    assert path == str(tmp_path / "697c4901ab738(1).mp4")
+    assert (tmp_path / "697c4901ab738.mp4").read_bytes() == b"old"   # 旧文件没被动
+
+
+def test_download_pornhub_audio_uses_m4a_target(tmp_path, monkeypatch):
+    """仅音频预设 → .m4a 名, 且让模块直接从本地 playlist 抽音频."""
+    monkeypatch.setattr(downloader, "extract_pornhub", lambda url, **kw: _ph_video(vid="999"))
+    seen = {}
+
+    def fake_hls(video, dest, **kw):
+        seen["dest"], seen["audio_only"] = dest, kw.get("audio_only")
+        with open(dest, "wb") as f:
+            f.write(b"fake")
+        return dest
+
+    monkeypatch.setattr(downloader, "download_hls", fake_hls)
+    path, skipped = download(PH_URL, str(tmp_path), "仅音频 (m4a)")
+    assert skipped is False
+    assert path.endswith(".m4a") and os.path.exists(path)
+    assert seen["audio_only"] is True
+
+
+def test_download_pornhub_signals_extracting_status(tmp_path, monkeypatch):
+    """取流阶段要先发 pornhub_extracting, 否则 GUI 看起来像卡死."""
+    monkeypatch.setattr(downloader, "extract_pornhub", lambda url, **kw: _ph_video())
+    monkeypatch.setattr(downloader, "download_hls",
+                        lambda video, dest, **kw: open(dest, "wb").write(b"f") or dest)
+    seen = []
+    download(PH_URL, str(tmp_path), "最高画质 (mp4)",
+             on_progress=lambda d: seen.append(d.get("status")))
+    assert "pornhub_extracting" in seen
+
+
+def test_download_pornhub_reports_segment_failure(tmp_path, monkeypatch):
+    """分片下载失败 → 可读报错 (含重试提示), 不抛异常."""
+    monkeypatch.setattr(downloader, "extract_pornhub", lambda url, **kw: _ph_video())
+
+    def boom(*a, **kw):
+        raise PornhubUnavailable("seg_00007.ts 重试 30 次仍失败 (HTTP 410)")
+
+    monkeypatch.setattr(downloader, "download_hls", boom)
+    errs = []
+    path, skipped = download(PH_URL, str(tmp_path), "最高画质 (mp4)",
+                             on_error=errs.append)
+    assert path is None and skipped is False
+    assert errs and "分片下载" in errs[0] and "重试" in errs[0]

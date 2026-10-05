@@ -6,10 +6,12 @@
   - download_sync(url, out_dir, fmt, q, cookies_browser): queue 适配
     (向后兼容批量/旧调用), 内部转调 download().
 
-两条下载通路 (download() 按域名自动分流):
+三条下载通路 (download() 按域名自动分流):
   - YouTube 等: 走 yt-dlp 原生 extractor (需代理, 见 _make_opts 的 direct).
   - 抖音: 走浏览器取流 (_download_douyin) — yt-dlp 的 DouyinIE 已被抖音
     ArgusSecurityPlugin 签名墙打死, 详见 douyin_browser 模块 docstring.
+  - Pornhub: 走页面 flashvars 的 HLS (_download_pornhub) — yt-dlp 的 PornHubIE
+    要靠已停维护的 PhantomJS 过反爬挑战, 详见 pornhub 模块 docstring.
 
 最终文件路径检测: 记录下载前 output_dir 最新 mtime, 下载后取 mtime 更新的
 那个媒体文件 (不依赖 yt-dlp 内部命名/合并后改名细节, 最稳).
@@ -39,6 +41,12 @@ from .douyin_browser import (  # noqa: E402  # 同上, 必须在 stdout reconfig
     extract_douyin,
     is_douyin_url,
     pick_best_gear,
+)
+from .pornhub import (  # noqa: E402  # 同上; 纯函数层不依赖 curl_cffi (延迟导入)
+    PornhubUnavailable,
+    download_hls,
+    extract_pornhub,
+    is_pornhub_url,
 )
 
 # 已知好路径优先 (Winget 版编码 bug); 不存在回退 PATH.
@@ -335,6 +343,54 @@ def _download_douyin(url: str, output_dir: str, format_label: str, *,
     return found, (found is None)
 
 
+# ---- Pornhub (flashvars → HLS) ----
+# yt-dlp 的 PornHubIE 靠已停维护的 PhantomJS 过 `body onload="go()"` 反爬挑战,
+# 本机没装 → 恒定 "PhantomJS not found" (带登录 cookie 也一样). 改走页面 flashvars
+# 里的 HLS: 分片由 curl_cffi 拉到本地再让 ffmpeg 本地拼接 (ffmpeg 的 HTTP 栈过不了
+# 该 CDN 的校验). 四个坑详见 pornhub 模块 docstring.
+
+
+def _download_pornhub(url: str, output_dir: str, format_label: str, *,
+                      on_progress, on_error, force: bool) -> tuple[str | None, bool]:
+    """Pornhub 下载: 取页面 flashvars → 选 HLS 档 → 分片落地 → ffmpeg 拼接.
+
+    返回约定与 download() 一致: (final_path | None, skipped).
+    """
+    hook = on_progress or _noop
+    audio = is_audio_format(format_label)
+    # 反爬维护页/无 token 直链都要重试, 冷启动可能十几秒 —— 先给 UI 一个反馈,
+    # 否则界面看起来像卡死 (与抖音的 douyin_extracting 同一目的).
+    hook({"status": "pornhub_extracting"})
+
+    try:
+        video = extract_pornhub(url, on_status=lambda _n, _d: hook(
+            {"status": "pornhub_extracting"}))
+    except PornhubUnavailable as e:
+        if on_error:
+            on_error(f"{url}\n    [Pornhub] 取流不可用: {e}")
+        return None, False
+    except Exception as e:
+        if on_error:
+            on_error(f"{url}\n    [Pornhub] 取流失败: {type(e).__name__}: {e}")
+        return None, False
+
+    # 产物只用 viewkey 命名 (标题不进文件名/命令行/日志, 见 content-filter-1301 约定)
+    final = os.path.join(output_dir, f"{video.viewkey}{'.m4a' if audio else '.mp4'}")
+    if force:
+        final = _free_slot(final)          # 不覆盖旧文件: 顺延成 a(1)/a(2)
+    elif os.path.exists(final):
+        return final, True                 # 增量跳过 (与 YouTube/抖音路径一致)
+
+    try:
+        download_hls(video, final, audio_only=audio, on_progress=hook)
+    except Exception as e:
+        if on_error:
+            on_error(f"{url}\n    [Pornhub] 分片下载/拼接失败: {type(e).__name__}: {e}\n"
+                     "      (反爬拦截或 token 过期, 重试一次通常就好)")
+        return None, False
+    return (final, False) if os.path.exists(final) else (None, False)
+
+
 def download(url: str, output_dir: str, format_label: str, *,
              on_progress: Callable[[dict], None] | None = None,
              on_error: Callable[[str], None] | None = None,
@@ -355,6 +411,11 @@ def download(url: str, output_dir: str, format_label: str, *,
         return _download_douyin(url, output_dir, format_label,
                                 on_progress=on_progress, on_error=on_error,
                                 force=force)
+    if is_pornhub_url(url):
+        # Pornhub 走 flashvars 的 HLS — yt-dlp 的 PornHubIE 死在 PhantomJS (见上)
+        return _download_pornhub(url, output_dir, format_label,
+                                 on_progress=on_progress, on_error=on_error,
+                                 force=force)
     before = _newest_mtime(output_dir)
     hook = on_progress or _noop
     outtmpl = None
