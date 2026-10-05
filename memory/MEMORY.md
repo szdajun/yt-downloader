@@ -1,0 +1,9 @@
+- [项目身份与边界](project-scope.md) — YouTube/抖音 GUI,下游是 fitness-video-pipeline,验证阈值是核心业务逻辑
+- [run.bat 修复踩坑](run-bat-pitfalls.md) — chcp 65001 兼容、shim hang、pyenv PATH 自愈、JS 运行时依赖
+- [用户角色与协作偏好](user-role.md) — 开发者兼使用方,改核心业务逻辑要主动说明,架构级改动先 spike 验证
+- [代码风格约定](code-style.md) — 中文注释/UI/Commit、Win 路径、注释解释 WHY
+- [下游主管线接口契约](downstream-pipeline.md) — 输出目录、准入标记、瑜伽缩略图位置
+- [码率门槛 2Mbps + 待验证画质](douyin-2mbps-gate-pending-visual-check.md) — 2026-09-17 由 5Mbps 下调适配抖音源;**待办: 实跑一条抖音源看 upscale 观感**(bpp 0.047 vs 被拒源 0.152)
+- [chunlou.tv 取流档案](chunlou-tv-download-profile.md) — CDN 仅查 UA, yt-dlp 直吃 HLS; ep 参数即集 UUID; 付费墙结构; 画质因剧差异大
+- [敏感源 1301 处理约定](content-filter-1301-handling.md) — 文件名用 %(id)s、不复述敏感标题; 1301 是 GLM 内容审计, 重试即恢复
+- [Pornhub 取流档案](pornhub-download-profile.md) — yt-dlp 死在 PhantomJS; 走 flashvars 的 HLS + 页面 session cookie; 已集成进 yt_downloader/pornhub.py
