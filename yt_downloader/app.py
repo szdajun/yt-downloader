@@ -41,7 +41,7 @@ from .workers import BatchWorker, DeepCheckWorker, DownloadWorker, TrimWorker, Y
 from .yoga_check import fitness_env
 
 APP_TITLE = "YT 视频下载器"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"   # 新增 YouPorn 支持 (HLS 优先 + MP4 兜底)
 
 # 认证: 绕 YouTube "Sign in to confirm you're not a bot". Chrome/Edge 新版加密读不出,
 # 仅 Firefox 可自动读 (需在 Firefox 登录过 YouTube); cookies.txt 文件最通用 (扩展导出).
@@ -145,7 +145,7 @@ class MainWindow(QMainWindow):
     def _build_url_row(self) -> None:
         row = QHBoxLayout()
         self.url_edit = QLineEdit()
-        self.url_edit.setPlaceholderText("粘贴 YouTube / 抖音 链接 (https://...)")
+        self.url_edit.setPlaceholderText("粘贴 YouTube / 抖音 / Pornhub / YouPorn 链接 (https://...)")
         self.url_edit.setMinimumHeight(36)
         paste = QPushButton("📋 粘贴")
         paste.setFixedWidth(86)
@@ -549,6 +549,11 @@ class MainWindow(QMainWindow):
         if st == "pornhub_extracting":
             # 反爬维护页/无 token 直链都要重试, 冷启动可能十几秒 (见 pornhub 模块)
             self.status_lbl.setText("解析 Pornhub 直链 (反爬重试中)…")
+            self.speed_lbl.setText("")
+            return
+        if st == "youporn_extracting":
+            # TLS 抖动 + 反爬都要重试, 8 轮前 UI 不能像卡死 (见 youporn 模块)
+            self.status_lbl.setText("解析 YouPorn 直链 (反爬重试中)…")
             self.speed_lbl.setText("")
             return
         if st == "downloading":

@@ -21,6 +21,7 @@ from yt_downloader.downloader import (
     is_audio_format,
 )
 from yt_downloader.pornhub import PornhubUnavailable, PornhubVideo
+from yt_downloader.youporn import HlsPlan, Mp4Plan, YoupornUnavailable, YoupornVideo
 
 
 # ---- FORMATS 字典结构 ----
@@ -374,3 +375,197 @@ def test_download_pornhub_reports_segment_failure(tmp_path, monkeypatch):
                              on_error=errs.append)
     assert path is None and skipped is False
     assert errs and "分片下载" in errs[0] and "重试" in errs[0]
+
+
+# ---------------- YouPorn ----------------
+# 镜像 Pornhub 路由测试 + HlsPlan/Mp4Plan 分发测试. 你看不到 yt-dlp 的影子
+# (YouPornIE extractor 的 stale filter 让 yt-dlp 完全跑不通, 不存在兜底).
+YP_URL = "https://www.youporn.com/watch/103059821/"
+YP_VID = "103059821"
+
+
+def _yp_video(plan=None, vid=YP_VID, dur=660, quality=1080):
+    if plan is None:
+        plan = HlsPlan(master="https://cdn/x/index.m3u8?token=1", variant_short_side=1080)
+    return YoupornVideo(vid=vid, session=None, plan=plan, duration=dur, quality=quality)
+
+
+def test_download_routes_youporn_to_hls_path(tmp_path, monkeypatch):
+    """YouPorn URL 不得落到 yt-dlp 通路 (其 YouPornIE extractor 的 stale filter
+    会让 download 报 No video formats found)."""
+    seen = {}
+
+    def fake_extract(url, **kw):
+        seen["url"] = url
+        raise YoupornUnavailable("页面取不到 (TLS 抖动 12 轮)")
+
+    monkeypatch.setattr(downloader, "extract_youporn", fake_extract)
+    calls = _patch_fake_ydl(monkeypatch)
+    errs = []
+    path, skipped = download(YP_URL, str(tmp_path), "最高画质 (mp4)",
+                             on_error=errs.append)
+    assert seen["url"] == YP_URL
+    assert calls == []                      # 关键: 没走 yt-dlp
+    assert path is None and skipped is False
+    assert errs and "YouPorn" in errs[0]
+
+
+def test_download_routes_youporn_no_trailing_slash(tmp_path, monkeypatch):
+    """URL 不带尾斜杠也应识别并走 youporn 通路."""
+    seen = {}
+
+    def fake_extract(url, **kw):
+        seen["url"] = url
+        return _yp_video()
+
+    monkeypatch.setattr(downloader, "extract_youporn", fake_extract)
+    monkeypatch.setattr(downloader, "download_youporn_hls",
+                        lambda video, dest, **kw: open(dest, "wb").write(b"f") or dest)
+    url = "https://www.youporn.com/watch/103059821"   # 无尾斜杠
+    path, skipped = download(url, str(tmp_path), "最高画质 (mp4)")
+    assert seen["url"] == url
+    assert path == str(tmp_path / f"{YP_VID}.mp4")
+
+
+def test_download_youporn_writes_id_named_file(tmp_path, monkeypatch):
+    """产物只用 numeric id 命名 —— 标题不得进文件名 (敏感源约定)."""
+    monkeypatch.setattr(downloader, "extract_youporn", lambda url, **kw: _yp_video())
+    seen = {}
+
+    def fake_hls(video, dest, **kw):
+        seen["dest"] = dest
+        seen["audio_only"] = kw.get("audio_only")
+        with open(dest, "wb") as f:
+            f.write(b"fake")
+        return dest
+
+    monkeypatch.setattr(downloader, "download_youporn_hls", fake_hls)
+    path, skipped = download(YP_URL, str(tmp_path), "最高画质 (mp4)")
+    assert skipped is False
+    assert path == str(tmp_path / f"{YP_VID}.mp4")
+    assert os.path.basename(path) == f"{YP_VID}.mp4"
+    assert seen["dest"] == path and seen["audio_only"] is False
+
+
+def test_download_youporn_skips_existing_file(tmp_path, monkeypatch):
+    """目标文件已存在 → 增量跳过, 一次都不下."""
+    monkeypatch.setattr(downloader, "extract_youporn", lambda url, **kw: _yp_video())
+    existing = tmp_path / f"{YP_VID}.mp4"
+    existing.write_bytes(b"old")
+    calls = []
+    monkeypatch.setattr(downloader, "download_youporn_hls",
+                        lambda *a, **kw: calls.append(a))
+
+    path, skipped = download(YP_URL, str(tmp_path), "最高画质 (mp4)")
+    assert skipped is True
+    assert path == str(existing)
+    assert calls == []
+
+
+def test_download_youporn_force_bumps_to_free_slot(tmp_path, monkeypatch):
+    """force → 落到空闲的 a(1), 旧文件不动."""
+    monkeypatch.setattr(downloader, "extract_youporn", lambda url, **kw: _yp_video())
+    (tmp_path / f"{YP_VID}.mp4").write_bytes(b"old")
+
+    def fake_hls(video, dest, **kw):
+        with open(dest, "wb") as f:
+            f.write(b"new")
+        return dest
+
+    monkeypatch.setattr(downloader, "download_youporn_hls", fake_hls)
+    path, skipped = download(YP_URL, str(tmp_path), "最高画质 (mp4)", force=True)
+    assert skipped is False
+    assert path == str(tmp_path / f"{YP_VID}(1).mp4")
+    assert (tmp_path / f"{YP_VID}.mp4").read_bytes() == b"old"
+
+
+def test_download_youporn_audio_uses_m4a_target(tmp_path, monkeypatch):
+    """仅音频预设 → .m4a 名, audio_only=True 传下去."""
+    monkeypatch.setattr(downloader, "extract_youporn",
+                        lambda url, **kw: _yp_video(vid="999"))
+    seen = {}
+
+    def fake_hls(video, dest, **kw):
+        seen["dest"], seen["audio_only"] = dest, kw.get("audio_only")
+        with open(dest, "wb") as f:
+            f.write(b"fake")
+        return dest
+
+    monkeypatch.setattr(downloader, "download_youporn_hls", fake_hls)
+    path, skipped = download(YP_URL, str(tmp_path), "仅音频 (m4a)")
+    assert skipped is False
+    assert path.endswith(".m4a") and os.path.exists(path)
+    assert seen["audio_only"] is True
+
+
+def test_download_youporn_signals_extracting_status(tmp_path, monkeypatch):
+    """取流阶段要先发 youporn_extracting, 否则 GUI 看起来像卡死."""
+    monkeypatch.setattr(downloader, "extract_youporn", lambda url, **kw: _yp_video())
+    monkeypatch.setattr(downloader, "download_youporn_hls",
+                        lambda video, dest, **kw: open(dest, "wb").write(b"f") or dest)
+    seen = []
+    download(YP_URL, str(tmp_path), "最高画质 (mp4)",
+             on_progress=lambda d: seen.append(d.get("status")))
+    assert "youporn_extracting" in seen
+
+
+def test_download_youporn_reports_segment_failure(tmp_path, monkeypatch):
+    """分片下载失败 → 可读报错 (含重试提示)."""
+    monkeypatch.setattr(downloader, "extract_youporn", lambda url, **kw: _yp_video())
+
+    def boom(*a, **kw):
+        raise YoupornUnavailable("seg_00007.ts 重试 30 次仍失败 (HTTP 410)")
+
+    monkeypatch.setattr(downloader, "download_youporn_hls", boom)
+    errs = []
+    path, skipped = download(YP_URL, str(tmp_path), "最高画质 (mp4)",
+                             on_error=errs.append)
+    assert path is None and skipped is False
+    assert errs and "YouPorn" in errs[0] and "重试" in errs[0]
+
+
+def test_download_youporn_hls_plan_dispatches_to_hls(tmp_path, monkeypatch):
+    """YoupornVideo.plan 是 HlsPlan → 调 download_youporn_hls, 不调 mp4."""
+    monkeypatch.setattr(downloader, "extract_youporn", lambda url, **kw: _yp_video())
+    hls_calls, mp4_calls = [], []
+    monkeypatch.setattr(downloader, "download_youporn_hls",
+                        lambda video, dest, **kw: (
+                            hls_calls.append((video.plan.master, dest))
+                            or open(dest, "wb").write(b"f") or dest))
+    monkeypatch.setattr(downloader, "download_youporn_mp4",
+                        lambda video, dest, **kw: mp4_calls.append(dest) or dest)
+    download(YP_URL, str(tmp_path), "最高画质 (mp4)")
+    assert len(hls_calls) == 1
+    assert hls_calls[0][0] == "https://cdn/x/index.m3u8?token=1"
+    assert mp4_calls == []
+
+
+def test_download_youporn_mp4_plan_dispatches_to_mp4(tmp_path, monkeypatch):
+    """YoupornVideo.plan 是 Mp4Plan → 调 download_youporn_mp4, 不调 hls."""
+    mp4_plan = Mp4Plan(url="https://cdn/x/1080.mp4?token=1", short_side=1080)
+    monkeypatch.setattr(downloader, "extract_youporn",
+                        lambda url, **kw: _yp_video(plan=mp4_plan))
+    hls_calls, mp4_calls = [], []
+    monkeypatch.setattr(downloader, "download_youporn_hls",
+                        lambda video, dest, **kw: hls_calls.append(dest) or dest)
+    monkeypatch.setattr(downloader, "download_youporn_mp4",
+                        lambda video, dest, **kw: (
+                            mp4_calls.append((video.plan.url, dest))
+                            or open(dest, "wb").write(b"f") or dest))
+    download(YP_URL, str(tmp_path), "最高画质 (mp4)")
+    assert len(mp4_calls) == 1
+    assert mp4_calls[0][0] == "https://cdn/x/1080.mp4?token=1"
+    assert hls_calls == []
+
+
+def test_download_youporn_reports_unavailable(tmp_path, monkeypatch):
+    """extract_youporn 抛 YoupornUnavailable → 可读中文报错 (含 '取流不可用')."""
+    def boom(url, **kw):
+        raise YoupornUnavailable("HLS 8 轮 + MP4 兜底都拿不到可用直链")
+
+    monkeypatch.setattr(downloader, "extract_youporn", boom)
+    errs = []
+    path, skipped = download(YP_URL, str(tmp_path), "最高画质 (mp4)",
+                             on_error=errs.append)
+    assert path is None and skipped is False
+    assert errs and "[YouPorn]" in errs[0] and "取流不可用" in errs[0]

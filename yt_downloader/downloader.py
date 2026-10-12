@@ -48,6 +48,18 @@ from .pornhub import (  # noqa: E402  # 同上; 纯函数层不依赖 curl_cffi 
     extract_pornhub,
     is_pornhub_url,
 )
+from .youporn import (  # noqa: E402  # 同上; 纯函数层不依赖 curl_cffi (延迟导入)
+    HlsPlan,
+    YoupornUnavailable,
+    extract_youporn,
+    is_youporn_url,
+)
+from .youporn import (  # noqa: E402  # 同上
+    download_hls as download_youporn_hls,
+)
+from .youporn import (  # noqa: E402  # 同上
+    download_mp4_direct as download_youporn_mp4,
+)
 
 # 已知好路径优先 (Winget 版编码 bug); 不存在回退 PATH.
 _FFMPEG_DIR = r"C:\Users\18091\ffmpeg"
@@ -391,6 +403,57 @@ def _download_pornhub(url: str, output_dir: str, format_label: str, *,
     return (final, False) if os.path.exists(final) else (None, False)
 
 
+# ---- YouPorn (HLS 优先 + MP4 兜底) ----
+# yt-dlp 的 YouPornIE extractor 内部 filter `not isinstance(v['defaultQuality'],
+# bool)` 已 stale (当前所有 defaultQuality 都是 bool → HLS 全被滤掉, 只剩 vcodec=
+# None 的 mp4 dict → `No video formats found`). 升级 yt-dlp 无效. 改走页面
+# playervars.mediaDefinitions 自己解析, HLS 8 轮 + MP4 1 轮兜底. 三个坑详见
+# youporn 模块 docstring.
+
+def _download_youporn(url: str, output_dir: str, format_label: str, *,
+                      on_progress, on_error, force: bool) -> tuple[str | None, bool]:
+    """YouPorn: HLS 优先 8 轮, 全失败再 1 轮 MP4. 镜像 _download_pornhub.
+
+    返回约定与 download() 一致: (final_path | None, skipped).
+    """
+    hook = on_progress or _noop
+    audio = is_audio_format(format_label)
+    # 反爬/TLS 抖动都可能让首轮失败, 8 轮前 UI 看起来像卡死
+    # (与抖音/Pornhub 的 *_extracting 同一目的).
+    hook({"status": "youporn_extracting"})
+
+    try:
+        video = extract_youporn(url, on_status=lambda _n, _d: hook(
+            {"status": "youporn_extracting"}))
+    except YoupornUnavailable as e:
+        if on_error:
+            on_error(f"{url}\n    [YouPorn] 取流不可用: {e}")
+        return None, False
+    except Exception as e:
+        if on_error:
+            on_error(f"{url}\n    [YouPorn] 取流失败: {type(e).__name__}: {e}")
+        return None, False
+
+    # 产物只用 numeric id 命名 (标题不进文件名/命令行/日志, 见 content-filter-1301 约定)
+    final = os.path.join(output_dir, f"{video.vid}{'.m4a' if audio else '.mp4'}")
+    if force:
+        final = _free_slot(final)          # 不覆盖旧文件: 顺延成 a(1)/a(2)
+    elif os.path.exists(final):
+        return final, True                 # 增量跳过 (与 YouTube/抖音/Pornhub 路径一致)
+
+    try:
+        if isinstance(video.plan, HlsPlan):
+            download_youporn_hls(video, final, audio_only=audio, on_progress=hook)
+        else:
+            download_youporn_mp4(video, final, audio_only=audio, on_progress=hook)
+    except Exception as e:
+        if on_error:
+            on_error(f"{url}\n    [YouPorn] 下载/拼接失败: {type(e).__name__}: {e}\n"
+                     "      (反爬拦截或 token 过期, 重试一次通常就好)")
+        return None, False
+    return (final, False) if os.path.exists(final) else (None, False)
+
+
 def download(url: str, output_dir: str, format_label: str, *,
              on_progress: Callable[[dict], None] | None = None,
              on_error: Callable[[str], None] | None = None,
@@ -414,6 +477,12 @@ def download(url: str, output_dir: str, format_label: str, *,
     if is_pornhub_url(url):
         # Pornhub 走 flashvars 的 HLS — yt-dlp 的 PornHubIE 死在 PhantomJS (见上)
         return _download_pornhub(url, output_dir, format_label,
+                                 on_progress=on_progress, on_error=on_error,
+                                 force=force)
+    if is_youporn_url(url):
+        # YouPorn 走页面 mediaDefinitions 的 HLS 优先 + MP4 兜底 —
+        # yt-dlp 的 YouPornIE extractor filter 已 stale (见 _download_youporn)
+        return _download_youporn(url, output_dir, format_label,
                                  on_progress=on_progress, on_error=on_error,
                                  force=force)
     before = _newest_mtime(output_dir)

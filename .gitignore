@@ -18,6 +18,11 @@ dist/
 # Claude Code local config (API tokens, machine-specific overrides)
 .claude/glm.json
 .claude/settings.local.json
+.claude/commandcode-*.json
+.claude/deepseek-*.json
+.claude/deepseek-*.NOTES.md
+.claude/minimax.json
+.claude/opencode-go*.json
 
 # Windows 桌面快捷方式 — 本地双击启动用, 路径含本机绝对位置, 不进仓库
 /视频下载器.lnk

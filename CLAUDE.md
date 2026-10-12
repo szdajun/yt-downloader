@@ -4,24 +4,25 @@ Claude Code 项目级配置 — `F:\wkspace\yt-downloader` 自动加载。
 
 ## 项目身份
 
-YouTube / 抖音 / Pornhub 视频下载器 GUI 桌面应用。四类关键依赖:
+YouTube / 抖音 / Pornhub / YouPorn 视频下载器 GUI 桌面应用。四类关键依赖:
 - **PySide6 (Qt6)** — 主窗口 + QThread 子线程模型
 - **yt-dlp** — 下载引擎 + 格式协商
 - **Node.js ≥22** — YouTube 2025+ n-challenge 签名求解器(必装,否则「No video formats found」)
-- **curl_cffi** — Pornhub 分片下载(该 CDN 只放行带 Chrome TLS 指纹的客户端,见下)
+- **curl_cffi** — Pornhub / YouPorn 分片下载(CDN 只放行带 Chrome TLS 指纹的客户端,见下)
 
 业务核心:下载后 ffprobe 验证准入门槛(短边 ≥720px / 码率 ≥2Mbps / 时长 ≥30s)+ 瑜伽源衣着预审。产物是下游健身主管线 `F:\wkspace\fitness-video-pipeline` 的视频源。
 
 ## 架构速览
 
-入口 `yt_downloader/app.py:main()`。包结构(11 个模块):
+入口 `yt_downloader/app.py:main()`。包结构(12 个模块):
 
 | 模块 | 职责 |
 |---|---|
 | `app.py` | 主窗口 + 入口(QMainWindow + 信号槽) |
-| `downloader.py` | yt-dlp 封装 + 格式映射(FORMATS/AUDIO_SUFFIXES) + 抖音/Pornhub/YouTube 分流 |
+| `downloader.py` | yt-dlp 封装 + 格式映射(FORMATS/AUDIO_SUFFIXES) + 抖音/Pornhub/YouPorn/YouTube 分流 |
 | `douyin_browser.py` | 抖音浏览器取流(Playwright 驱动系统 Chrome/Edge, 绕抖音签名墙) |
 | `pornhub.py` | Pornhub 取流(页面 flashvars 的 HLS + curl_cffi 分片, 绕 yt-dlp 的 PhantomJS 死路) |
+| `youporn.py` | YouPorn 取流(页面 mediaDefinitions 的 HLS 优先 + MP4 兜底, 绕 yt-dlp extractor 的 stale filter) |
 | `verify.py` | ffprobe 准入门槛(ProbeResult + probe()) |
 | `workers.py` | QThread 子线程 + Qt Signal(BatchWorker / DownloadWorker / TrimWorker / YogaFrameWorker / DeepCheckWorker) |
 | `dialogs.py` | 弹窗(BatchDialog / TrimDialog / YogaReviewDialog) |
@@ -105,3 +106,14 @@ YouTube / 抖音 / Pornhub 视频下载器 GUI 桌面应用。四类关键依赖
 **Pornhub 必须走代理(与抖音正好相反)。** 抖音 `proxy=""` 直连;Pornhub 走 `HTTP(S)_PROXY`。分流同样在 `_make_opts(direct=...)` 之外单开 `_download_pornhub`, 别把两者的代理设定搞混。
 
 **Pornhub 产物只用 viewkey 命名(`{viewkey}.mp4` / `.m4a`)。** 敏感源, 标题一律不进文件名、不进对话、不进命令 —— 见 `content-filter-1301-handling` 约定。
+
+**YouPorn 的 yt-dlp 提取器在 stale filter, 别再升 yt-dlp。** `YouPornIE._real_extract` 里有 `not isinstance(v['defaultQuality'], bool)` 这条过滤 —— 现在的 `mediaDefinitions` 所有条目 `defaultQuality` 都是 bool,导致 HLS 档位全部被滤掉;剩下的 mp4 又是 `vcodec=None` 的 dict,filter 完 formats 为空,下载报「No video formats found」。`youporn.py` 另起一条路: 抓页面 `mediaDefinitions` 数组, `format=hls` 走 HLS (8 轮重试) → 失败兜底 `format=mp4` (1 轮)。**`mp4` + `remote: true` 端点有 rate-limit 令牌, 通常被 50000k 限速, 仅作 TLS 抖动时降级用。**
+
+**YouPorn 三个实测坑:**
+1. **CDN 认抓页面那次的 session cookie。** 同 Pornhub 坑 1 —— yt-dlp 用它自己的 HTTP 客户端 GET `mediaDefinitions[*].videoUrl` JSON 时不带 page session, 反爬挡。`youporn.py` 整个生命周期共用同一个 curl_cffi session, page→JSON→segments 串到底。
+2. **curl_cffi 与 ypncdn TLS 握手偶发抖动。** 1/8 ~ 2/8 概率 `SSLError invalid library (0)` —— `_open_page` 12 轮重试 + 分片层 except Exception 覆盖, spike 实测重试 1~2 次就过。
+3. **mediaDefinitions 里的 hls entry 是「JSON endpoint」, 不是「具体档位」。** 它的 `quality=None`,**没有 height/width/bandwidth**, 真档位在 GET 这个 endpoint 拿到的 step2 JSON 数组里(每个元素含 `defaultQuality` / `width` / `height` / `videoUrl`)。**所以 `hls_gears()` 不能用 `if quality <= 0: continue` 过滤** —— 那样会把 HLS 候选全部丢掉, 跌穿到 MP4 兜底但仍能下, 让人误以为「HLS 永远失败」。
+
+**YouPorn 必须走代理(同 Pornhub, 与抖音相反)。** `HTTP(S)_PROXY` 即可, 走 `_download_youporn` 自己的代理设定, 别与抖音的 `proxy=""` 混。
+
+**YouPorn 产物只用 numeric id 命名(`{vid}.mp4` / `.m4a`)。** 敏感源, 与 Pornhub 同样约定: 标题一律不进文件名、不进对话、不进命令 —— 见 `content-filter-1301-handling`。

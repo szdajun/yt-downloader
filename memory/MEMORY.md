@@ -7,3 +7,4 @@
 - [chunlou.tv 取流档案](chunlou-tv-download-profile.md) — CDN 仅查 UA, yt-dlp 直吃 HLS; ep 参数即集 UUID; 付费墙结构; 画质因剧差异大
 - [敏感源 1301 处理约定](content-filter-1301-handling.md) — 文件名用 %(id)s、不复述敏感标题; 1301 是 GLM 内容审计, 重试即恢复
 - [Pornhub 取流档案](pornhub-download-profile.md) — yt-dlp 死在 PhantomJS; 走 flashvars 的 HLS + 页面 session cookie; 已集成进 yt_downloader/pornhub.py
+- [YouPorn 取流档案](youporn-download-profile.md) — yt-dlp stale filter (defaultQuality 全 bool); 走 mediaDefinitions HLS 优先 + MP4 兜底; 3 个已踩坑; 已集成进 yt_downloader/youporn.py

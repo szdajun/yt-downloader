@@ -1,6 +1,6 @@
 # 📺 YT 视频下载器
 
-一个桌面 GUI 下载器：粘贴 YouTube / 抖音 / Pornhub 链接 → 自动选最高清 → 下载后 **自动验证准入门槛**（短边 ≥720px / 码率 ≥2Mbps / 时长 ≥30s），红绿提示这个视频**能不能直接用作健身主管线/A+C 换脸的源素材**。
+一个桌面 GUI 下载器：粘贴 YouTube / 抖音 / Pornhub / YouPorn 链接 → 自动选最高清 → 下载后 **自动验证准入门槛**（短边 ≥720px / 码率 ≥2Mbps / 时长 ≥30s），红绿提示这个视频**能不能直接用作健身主管线/A+C 换脸的源素材**。
 
 底层用 [**yt-dlp**](https://github.com/yt-dlp/yt-dlp)（业界标准下载引擎）+ 已有的 ffmpeg 合流；界面用 [**PySide6 (Qt6)**](https://www.qt.io/)（原生控件、信号槽、QThread 线程模型）。
 
@@ -23,6 +23,7 @@
 - **🔑 认证** — 绕 YouTube 机器人验证：Firefox 自动读 cookies，或用扩展导出 cookies.txt 文件（Chrome/Edge 必选）
 - **🎵 抖音** — 同样支持抖音链接（`douyin.com/video/...`），驱动本机 Chrome/Edge 取流，默认下**无水印**干净源，无需登录
 - **🔞 Pornhub** — 支持 `pornhub.com/view_video.php?viewkey=...` 等链接，直取 HLS 最高档；产物**只用 viewkey 命名**（标题不进文件名）
+- **🔞 YouPorn** — 支持 `youporn.com/watch/<id>/` 链接，HLS 优先 + MP4 兜底；产物**只用数字 id 命名**（标题不进文件名）
 - **设置记忆** — 输出目录 / 品质 / 验证开关 / 认证方式自动存到 `~/.yt-downloader/config.json`，下次打开恢复
 - **格式预设** — 最高画质 / 1080p / 720p / 仅音频(m4a)
 - **实时进度** — 进度条 + 速度 + 剩余时间 + ffmpeg 合流状态
@@ -187,6 +188,24 @@ YouTube 对未登录访问会弹「Sign in to confirm you're not a bot」，下�
 
 ---
 
+## 🔞 YouPorn 下载
+
+粘 `https://www.youporn.com/watch/<id>/`（或 `/embed/<id>/`、直接粘数字 id）即可，**无需登录、无需浏览器插件**。
+
+**取流方式（2026-10 起）**：yt-dlp 自带的 `YouPornIE` 有一条 stale filter（`not isinstance(v['defaultQuality'], bool)`）—— 现在的 `mediaDefinitions` 所有条目 `defaultQuality` 都是 bool,导致 HLS 档位**全部**被滤掉,剩下的 mp4 又是 `vcodec=None` 的 dict,filter 完 formats 为空,下载报「No video formats found」——**升级 yt-dlp、换 cookie 都没用**。所以本工具改走页面 `mediaDefinitions`,**HLS 优先**(GET 端点 JSON 拿 4 个 master,选最高,curl_cffi 抓分片,ffmpeg `-c copy` 拼通),TLS 抖动时**MP4 兜底**(单文件 GET,带 rate-limit token,稍慢但稳)。
+
+**必须走代理**：YouPorn CDN `ev-h-ph.ypncdn.com` 对境外访问需经 `HTTP(S)_PROXY`——**与 Pornhub 相同,正好与抖音相反**(抖音强制直连)。这个分流是自动的。
+
+**三个实测过的坑**(都已在 `yt_downloader/youporn.py` 里处理掉,改动时注意别退化):
+
+1. **CDN 认抓页面那次的 session cookie** —— 同 Pornhub 坑 1,GET `mediaDefinitions[*].videoUrl` 的 JSON 端点必须带 page session cookie,否则反爬挡。整个生命周期共用一个 curl_cffi session,page→JSON→segments 串到底。
+2. **curl_cffi 与 ypncdn TLS 握手偶发抖动** —— 1/8 ~ 2/8 概率 `SSLError invalid library (0)`,`_open_page` 12 轮重试 + 分片层 except Exception 覆盖,spike 实测重试 1~2 次就过。
+3. **`mediaDefinitions` 里的 hls entry 是「JSON endpoint」, 不是「具体档位」** —— 它的 `quality=None`,**没有 height/width/bandwidth**,真档位在 GET 这个 endpoint 拿到的 step2 JSON 数组里(`defaultQuality` / `width` / `height` / `videoUrl`)。所以 `hls_gears()` 不能用 `if quality <= 0: continue` 过滤 —— 那样会把 HLS 候选全部丢掉,跌穿到 MP4 兜底但仍能下,让人误以为「HLS 永远失败」。
+
+**产物命名**：`<id>.mp4`(仅音频预设为 `.m4a`)。**标题不进文件名、不进日志**——源敏感,同 Pornhub 约定;比 yt-dlp 的 `%(title)s` 更好认、更好去重。
+
+---
+
 ## 🎯 为什么有「准入门槛」？
 
 健身短视频处理流水线（同作者的 `fitness-video-pipeline` 项目）对源素材有硬要求：
@@ -230,9 +249,10 @@ yt-downloader/
     ├── app.py              # GUI (PySide6/Qt) — 主窗口: 下载/进度/详情/播放/裁剪
     ├── workers.py          # QThread 后台 worker — 下载/批量/裁剪/瑜伽预审, 信号桥到主线程
     ├── dialogs.py          # 批量下载 / 裁剪 / 瑜伽预审 对话框
-    ├── downloader.py       # yt-dlp 封装 — 选格式 + ffmpeg 合流 + 进度回调 + 抖音/Pornhub 分流
+    ├── downloader.py       # yt-dlp 封装 — 选格式 + ffmpeg 合流 + 进度回调 + 抖音/Pornhub/YouPorn 分流
     ├── douyin_browser.py   # 抖音取流 — Playwright 驱动系统 Chrome/Edge 跑签名 JS
     ├── pornhub.py          # Pornhub 取流 — flashvars→HLS + curl_cffi 分片, 绕 PhantomJS 死路
+    ├── youporn.py          # YouPorn 取流 — mediaDefinitions→HLS 优先 + MP4 兜底, 绕 stale filter
     ├── verify.py           # ffprobe 准入门槛验证 (≥720/≥2Mbps/≥30s)
     ├── yoga_check.py       # 瑜伽预审 — ffmpeg 抽帧 + 检测 fitness venv + subprocess 深度扫描
     ├── trim.py             # ffmpeg 裁剪/去广告 (保留片段 或 删中段拼头尾)
